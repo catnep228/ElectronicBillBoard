@@ -1,0 +1,134 @@
+package ru.vlsu.ispi.controller;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.servlet.view.InternalResourceViewResolver;
+
+import ru.vlsu.ispi.dto.UserDTO;
+import ru.vlsu.ispi.service.UserService;
+
+@ExtendWith(MockitoExtension.class)
+class AuthControllerTest {
+
+    @Mock
+    private UserService userService;
+
+    @InjectMocks
+    private AuthController controller;
+
+    private MockMvc mockMvc;
+
+    @BeforeEach
+    void setUp() {
+        // Явный ViewResolver нужен, иначе standalone MockMvc падает
+        // с "Circular view path" (имя view "login" совпадает с URL /auth/login)
+        InternalResourceViewResolver viewResolver = new InternalResourceViewResolver();
+        viewResolver.setPrefix("/WEB-INF/views/");
+        viewResolver.setSuffix(".jsp");
+
+        mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .setViewResolvers(viewResolver)
+                .build();
+    }
+
+    // ---------- GET /auth/login ----------
+
+    @Test
+    @DisplayName("GET /auth/login возвращает страницу входа")
+    void loginPage_returnsLoginView() throws Exception {
+        mockMvc.perform(get("/auth/login"))
+                .andExpect(status().isOk())
+                .andExpect(view().name("login"));
+    }
+
+    // ---------- GET /auth/register ----------
+
+    @Test
+    @DisplayName("GET /auth/register возвращает форму с пустым UserDTO")
+    void registerPage_returnsFormWithEmptyUser() throws Exception {
+        mockMvc.perform(get("/auth/register"))
+                .andExpect(status().isOk())
+                .andExpect(view().name("register"))
+                .andExpect(model().attributeExists("user"));
+    }
+
+    // ---------- POST /auth/register ----------
+
+    @Test
+    @DisplayName("Успешная регистрация: редирект на логин, сервис вызван один раз")
+    void register_success_redirectsToLogin() throws Exception {
+        doNothing().when(userService).register(any(UserDTO.class));
+
+        mockMvc.perform(post("/auth/register")
+                        .param("password", "secret123")
+                        .param("passwordConfirm", "secret123"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/auth/login?registered"));
+
+        ArgumentCaptor<UserDTO> captor = ArgumentCaptor.forClass(UserDTO.class);
+        verify(userService).register(captor.capture());
+        assertThat(captor.getValue().getPassword()).isEqualTo("secret123");
+    }
+
+    @Test
+    @DisplayName("Пароли не совпадают: ошибка, сервис не вызывается")
+    void register_passwordMismatch_showsError() throws Exception {
+        mockMvc.perform(post("/auth/register")
+                        .param("password", "secret123")
+                        .param("passwordConfirm", "other456"))
+                .andExpect(status().isOk())
+                .andExpect(view().name("register"))
+                .andExpect(model().attribute("error", "Пароли не совпадают"));
+
+        verify(userService, never()).register(any());
+    }
+
+    @Test
+    @DisplayName("IllegalArgumentException из сервиса: показывается её сообщение")
+    void register_illegalArgument_showsServiceMessage() throws Exception {
+        doThrow(new IllegalArgumentException("Пользователь уже существует"))
+                .when(userService).register(any(UserDTO.class));
+
+        mockMvc.perform(post("/auth/register")
+                        .param("password", "secret123")
+                        .param("passwordConfirm", "secret123"))
+                .andExpect(status().isOk())
+                .andExpect(view().name("register"))
+                .andExpect(model().attribute("error", "Пользователь уже существует"));
+    }
+
+    @Test
+    @DisplayName("Неожиданное исключение: общая ошибка регистрации")
+    void register_unexpectedException_showsGenericError() throws Exception {
+        doThrow(new RuntimeException("DB down"))
+                .when(userService).register(any(UserDTO.class));
+
+        mockMvc.perform(post("/auth/register")
+                        .param("password", "secret123")
+                        .param("passwordConfirm", "secret123"))
+                .andExpect(status().isOk())
+                .andExpect(view().name("register"))
+                .andExpect(model().attribute("error", "Ошибка при регистрации: DB down"));
+    }
+}

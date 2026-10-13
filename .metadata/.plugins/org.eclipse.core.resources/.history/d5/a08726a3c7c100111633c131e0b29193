@@ -1,0 +1,73 @@
+package ru.vlsu.ispi.controller;
+
+import java.util.Objects;
+
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+
+import ru.vlsu.ispi.dto.UserDTO;
+import ru.vlsu.ispi.service.UserService;
+
+@Controller
+@RequestMapping("/auth")
+public class AuthController {
+
+    private static final Log log = LogFactory.getLog(AuthController.class);
+
+    private static final String VIEW_REGISTER = "register";
+
+    private final UserService userService;
+
+    public AuthController(UserService userService) {
+        this.userService = userService;
+    }
+
+    @GetMapping("/login")
+    public String login() {
+        return "login";
+    }
+
+    @GetMapping("/register")
+    public String register(Model model) {
+        model.addAttribute("user", new UserDTO());
+        return VIEW_REGISTER;
+    }
+
+    @PostMapping("/register")
+    public String registerSubmit(
+            @ModelAttribute("user") UserDTO dto,
+            Model model) {
+
+        String password = dto.getPassword();
+
+        if (password == null || password.isBlank()) {
+            model.addAttribute("error", "Пароль не может быть пустым");
+            return VIEW_REGISTER;
+        }
+
+        if (!Objects.equals(password, dto.getPasswordConfirm())) {
+            model.addAttribute("error", "Пароли не совпадают");
+            return VIEW_REGISTER;
+        }
+
+        try {
+            userService.register(dto);
+            return "redirect:/auth/login?registered";
+
+        } catch (IllegalArgumentException e) {
+            model.addAttribute("error", e.getMessage());
+            return VIEW_REGISTER;
+
+        } catch (Exception e) {
+            log.error("Ошибка при регистрации пользователя", e);
+            model.addAttribute("error", "Не удалось завершить регистрацию. Попробуйте позже");
+            return VIEW_REGISTER;
+        }
+    }
+}

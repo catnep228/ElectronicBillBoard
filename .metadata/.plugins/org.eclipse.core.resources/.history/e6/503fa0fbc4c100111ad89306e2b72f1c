@@ -1,0 +1,5 @@
+package ru.vlsu.ispi.controller;
+
+public class AuthControllerTest {
+
+}
